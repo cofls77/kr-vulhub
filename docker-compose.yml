@@ -1,0 +1,7 @@
+version: '3'
+services:
+  vuln-pma:
+    image: phpmyadmin/phpmyadmin:4.8.1
+    ports:
+      - "8080:80"
+    restart: always
